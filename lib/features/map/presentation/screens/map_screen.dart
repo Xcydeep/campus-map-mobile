@@ -3,20 +3,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../../../../shared/theme/app_text_styles.dart';
-import '../widgets/map_widget.dart';
+// import '../widgets/map_widget.dart'; // FlutterMap (OpenStreetMap) - désactivé
+import '../widgets/google_map_widget.dart'; // Google Maps - activé
 import '../widgets/search_bar_widget.dart';
 import '../widgets/floating_action_buttons.dart';
 import '../widgets/bottom_sheet_places_list.dart';
+import '../widgets/network_status_widget.dart';
 import '../providers/map_provider.dart';
 import '../providers/location_provider.dart';
+import '../providers/api_providers.dart';
+import '../../../../core/constants/campus_constants.dart';
+import '../../domain/entities/place.dart';
 
 class MapScreen extends ConsumerStatefulWidget {
   final String? shareToken;
 
-  const MapScreen({
-    super.key,
-    this.shareToken,
-  });
+  const MapScreen({super.key, this.shareToken});
 
   @override
   ConsumerState<MapScreen> createState() => _MapScreenState();
@@ -26,11 +28,33 @@ class _MapScreenState extends ConsumerState<MapScreen> {
   @override
   void initState() {
     super.initState();
-    
-    // Initialiser la localisation
+
+    // Initialiser la localisation et charger les données
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(locationProvider.notifier).getCurrentLocation();
-      
+
+      // Charger les POIs depuis l'API
+      ref.refresh(poisProvider);
+
+      // Quand les POIs sont chargés, les appliquer au provider de la carte
+      ref.listen<AsyncValue<List<Place>>>(poisProvider, (previous, next) {
+        next.whenData((places) {
+          if (places.isNotEmpty) {
+            ref.read(mapProvider.notifier).setPlaces(places);
+            // Centrer sur le campus si pas de position définie
+            if (ref.read(mapProvider).centerPosition == null) {
+              ref
+                  .read(mapProvider.notifier)
+                  .updateMapPosition(
+                    CampusConstants.campusLatitude,
+                    CampusConstants.campusLongitude,
+                    16.0,
+                  );
+            }
+          }
+        });
+      });
+
       // Si un token de partage est présent, décoder et afficher
       if (widget.shareToken != null) {
         _handleShareToken(widget.shareToken!);
@@ -49,66 +73,95 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     //final locationState = ref.watch(locationProvider);
 
     return Scaffold(
-      body: Stack(
-        children: [
-          // Carte principale
-          const MapWidget(),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Widget de statut réseau
+            const NetworkStatusWidget(),
 
-          // Barre de recherche en haut
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 16,
-            left: 16,
-            right: 16,
-            child: const SearchBarWidget(),
-          ),
+            // Contenu principal
+            Expanded(
+              child: Stack(
+                children: [
+                  // Carte principale - Google Maps
+                  const GoogleMapWidget(),
+                  // Ancienne carte OpenStreetMap (désactivée)
+                  // const MapWidget(),
 
-          // Indicateur de connexion hors-ligne
-          if (!mapState.isOnline)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 80,
-              left: 16,
-              right: 16,
-              child: _buildOfflineIndicator(),
-            ),
+                  // Barre de recherche en haut
+                  Positioned(
+                    top: 24,
+                    left: 16,
+                    right: 16,
+                    child: const SearchBarWidget(),
+                  ),
 
-          // Boutons d'action flottants
-          Positioned(
-            right: 16,
-            bottom: 120,
-            child: FloatingActionButtons(
-              onMyLocationPressed: () {
-                ref.read(locationProvider.notifier).getCurrentLocation();
-                ref.read(mapProvider.notifier).centerOnUserLocation();
-              },
-              onLayersPressed: () {
-                _showLayersBottomSheet(context);
-              },
-              onSchedulePressed: () {
-                context.go('/schedule');
-              },
-            ),
-          ),
+                  // Indicateur de connexion hors-ligne
+                  if (!mapState.isOnline)
+                    Positioned(
+                      top: 80,
+                      left: 16,
+                      right: 16,
+                      child: _buildOfflineIndicator(),
+                    ),
 
-          // Bottom sheet avec liste des lieux si recherche active
-          if (mapState.searchResults.isNotEmpty)
-            const Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: BottomSheetPlacesList(),
-            ),
+                  // Boutons d'action flottants
+                  Positioned(
+                    right: 16,
+                    bottom: 120,
+                    child: FloatingActionButtons(
+                      onMyLocationPressed: () async {
+                        // Récupérer la position de l'utilisateur
+                        await ref
+                            .read(locationProvider.notifier)
+                            .getCurrentLocation();
 
-          // Loader pendant le chargement
-          if (mapState.isLoading)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black26,
-                child: const Center(
-                  child: CircularProgressIndicator(),
-                ),
+                        // Attendre un peu pour que la position soit mise à jour
+                        await Future.delayed(const Duration(milliseconds: 100));
+
+                        // Centrer la carte sur la position de l'utilisateur
+                        final locationState = ref.read(locationProvider);
+                        if (locationState.currentLocation != null) {
+                          ref
+                              .read(mapProvider.notifier)
+                              .updateMapPosition(
+                                locationState.currentLocation!.latitude,
+                                locationState.currentLocation!.longitude,
+                                16.0, // Zoom approprié
+                              );
+                        }
+                      },
+                      onLayersPressed: () {
+                        _showLayersBottomSheet(context);
+                      },
+                      onSchedulePressed: () {
+                        context.go('/schedule');
+                      },
+                    ),
+                  ),
+
+                  // Bottom sheet avec liste des lieux si recherche active
+                  if (mapState.searchResults.isNotEmpty)
+                    const Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      child: BottomSheetPlacesList(),
+                    ),
+
+                  // Loader pendant le chargement
+                  if (mapState.isLoading)
+                    Positioned.fill(
+                      child: Container(
+                        color: Colors.black26,
+                        child: const Center(child: CircularProgressIndicator()),
+                      ),
+                    ),
+                ],
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -129,11 +182,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.cloud_off,
-            color: Colors.white,
-            size: 20,
-          ),
+          const Icon(Icons.cloud_off, color: Colors.white, size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
@@ -163,27 +212,14 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Couches de la carte',
-              style: AppTextStyles.h5,
-            ),
+            Text('Couches de la carte', style: AppTextStyles.h5),
             const SizedBox(height: 20),
-            _buildLayerOption(
-              'Bâtiments',
-              Icons.business,
-              true,
-              (value) {
-                ref.read(mapProvider.notifier).toggleLayer('buildings', value);
-              },
-            ),
-            _buildLayerOption(
-              'Points d\'intérêt',
-              Icons.place,
-              true,
-              (value) {
-                ref.read(mapProvider.notifier).toggleLayer('poi', value);
-              },
-            ),
+            _buildLayerOption('Bâtiments', Icons.business, true, (value) {
+              ref.read(mapProvider.notifier).toggleLayer('buildings', value);
+            }),
+            _buildLayerOption('Points d\'intérêt', Icons.place, true, (value) {
+              ref.read(mapProvider.notifier).toggleLayer('poi', value);
+            }),
             _buildLayerOption(
               'Itinéraires piétons',
               Icons.directions_walk,
@@ -192,14 +228,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
                 ref.read(mapProvider.notifier).toggleLayer('pedestrian', value);
               },
             ),
-            _buildLayerOption(
-              'Parkings',
-              Icons.local_parking,
-              false,
-              (value) {
-                ref.read(mapProvider.notifier).toggleLayer('parking', value);
-              },
-            ),
+            _buildLayerOption('Parkings', Icons.local_parking, false, (value) {
+              ref.read(mapProvider.notifier).toggleLayer('parking', value);
+            }),
           ],
         ),
       ),

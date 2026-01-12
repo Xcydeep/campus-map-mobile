@@ -1,9 +1,17 @@
+// ============================================================================
+// FLUTTERMAP (OPENSTREETMAP) - DÉSACTIVÉ
+// Ce widget utilise FlutterMap avec OpenStreetMap au lieu de Google Maps
+// Il a été remplacé par GoogleMapWidget pour utiliser Google Maps
+// ============================================================================
+
+/*
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../../../../core/config/app_config.dart';
 import '../../../../shared/theme/app_colors.dart';
 import '../providers/map_provider.dart';
@@ -44,9 +52,8 @@ class _MapWidgetState extends ConsumerState<MapWidget> {
       next,
     ) {
       if (next != null) {
-        final position = next as LatLng;
         _mapController.move(
-          position,
+          LatLng(next.latitude, next.longitude),
           mapState.zoomLevel,
         );
       }
@@ -178,3 +185,4 @@ class _OfflineTileProvider extends TileProvider {
     return const AssetImage('assets/maps/offline_tile.png');
   }
 }
+*/
